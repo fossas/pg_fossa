@@ -16,3 +16,5 @@ BEGIN
   RETURN QUERY SELECT DISTINCT ON (child) * FROM results;
 END; $$
 LANGUAGE PLPGSQL;
+
+COMMENT ON FUNCTION fossa_dependencies_maxdepth(locator VARCHAR(255), maxdepth INT) IS 'pg_fossa version 1.1'

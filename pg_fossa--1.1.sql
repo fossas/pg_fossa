@@ -7,9 +7,16 @@ BEGIN
   CREATE TEMP TABLE results ON COMMIT DROP AS SELECT d.child AS child, 1 AS depth FROM "Dependencies" AS d WHERE d.parent=locator;
 
   WHILE current_depth < maxdepth LOOP
-    WITH f AS (
-      SELECT d.child AS child, (results.depth + 1) AS depth FROM "Dependencies" AS d INNER JOIN results ON d.parent=results.child WHERE results.depth=current_depth AND d.child NOT IN ( SELECT child FROM results WHERE child IS NOT NULL)
-    ) INSERT INTO results SELECT * FROM f;
+    WITH f AS ( SELECT d.child AS child,
+      (results.depth + 1) AS depth
+      FROM "Dependencies" AS d
+      INNER JOIN results ON d.parent=results.child
+      WHERE results.depth=current_depth
+        AND d.child NOT IN (
+          SELECT child
+          FROM results
+          WHERE child IS NOT NULL
+        )) INSERT INTO results SELECT * FROM f;
     current_depth := current_depth + 1;
   END LOOP;
 

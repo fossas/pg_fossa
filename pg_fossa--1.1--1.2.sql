@@ -2,22 +2,28 @@
 DROP FUNCTION fossa_dependencies_maxdepth(locator VARCHAR(255), maxdepth INT);
 DROP TYPE fossa_dependencies_graph_metadata CASCADE;
 
-CREATE TYPE fossa_nodes_results AS (
-  node VARCHAR,
-  level INT,
-  tags VARCHAR[],
-  manual BOOLEAN,
-  submodule BOOLEAN,
-  resolved BOOLEAN
-);
-CREATE TYPE fossa_edges_results AS (
+DROP TYPE fossa_edge CASCADE;
+DROP TYPE fossa_node CASCADE;
+
+CREATE TYPE fossa_edge AS (
   parent VARCHAR,
   child VARCHAR,
-  level INT,
+  resolved BOOLEAN,
+  excludes VARCHAR[],
   tags VARCHAR[],
   manual BOOLEAN,
   submodule BOOLEAN,
-  resolved BOOLEAN
+  depth INT
+);
+
+CREATE TYPE fossa_node AS (
+  node VARCHAR,
+  resolved BOOLEAN,
+  excludes VARCHAR[],
+  tags VARCHAR[],
+  manual BOOLEAN,
+  submodule BOOLEAN,
+  depth INT
 );
 
 CREATE OR REPLACE FUNCTION array_symmetric_difference(a1 VARCHAR[], a2 VARCHAR[]) RETURNS VARCHAR[] as $$
@@ -66,157 +72,175 @@ CREATE AGGREGATE array_intersect_agg(VARCHAR[]) (
   STYPE = VARCHAR[]
 );
 
-CREATE OR REPLACE FUNCTION fossa_null_dependency_helper(locator VARCHAR, unresolved_locator VARCHAR) RETURNS VARCHAR as $$
+CREATE OR REPLACE FUNCTION fossa_child(locator VARCHAR, unresolved_locator VARCHAR) RETURNS VARCHAR as $$
 BEGIN
-  RETURN CASE WHEN locator='NULL' THEN unresolved_locator ELSE locator END;
+  RETURN CASE WHEN fossa_resolved(locator) THEN locator ELSE unresolved_locator END;
 END; $$ LANGUAGE PLPGSQL IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255), tags VARCHAR[], maxdepth INT) RETURNS SETOF fossa_edges_results AS $$
-DECLARE
-  current_depth INT := 1;
-  current_tags VARCHAR[] := tags;
+CREATE OR REPLACE FUNCTION fossa_resolved(locator VARCHAR) RETURNS BOOLEAN as $$
 BEGIN
-  CREATE TEMP TABLE edges (
-    parent VARCHAR(255),
-    child VARCHAR(255),
-    excludes VARCHAR[],
-    level INT,
-    tags VARCHAR[],
-    manual BOOLEAN,
-    submodule BOOLEAN,
-    resolved BOOLEAN
-  ) ON COMMIT DROP;
-  CREATE TEMP TABLE working_edges (
-    parent VARCHAR(255),
-    child VARCHAR(255),
-    excludes VARCHAR[],
-    level INT,
-    tags VARCHAR[],
-    manual BOOLEAN,
-    submodule BOOLEAN,
-    resolved BOOLEAN
-  ) ON COMMIT DROP;
-  CREATE TEMP TABLE intermediate_edges (
-    parent VARCHAR(255),
-    child VARCHAR(255),
-    excludes VARCHAR[],
-    level INT,
-    tags VARCHAR[],
-    manual BOOLEAN,
-    submodule BOOLEAN,
-    resolved BOOLEAN
-  ) ON COMMIT DROP;
+  RETURN locator != 'NULL';
+END; $$ LANGUAGE PLPGSQL IMMUTABLE;
 
-  INSERT INTO working_edges
-    SELECT
-      d.parent AS parent,
-      fossa_null_dependency_helper(d.child, d.unresolved_locator) AS child,
-      d.transitive_excludes AS excludes,
-      current_depth AS level,
+CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255), filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_edge[] AS $$
+DECLARE
+  current_depth INT := 2;
+  results fossa_edge[] := ARRAY(SELECT CAST(ROW(
+      d.parent,
+      fossa_child(d.child, d.unresolved_locator),
+      fossa_resolved(d.child),
+      d.transitive_excludes,
       d.tags,
       d.manual,
-      d.is_submodule AS submodule,
-      d.child != 'NULL'
+      d.is_submodule,
+      1
+    ) AS fossa_edge)
     FROM "Dependencies" AS d
     WHERE d.parent=locator
-      AND (d.manual OR current_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR current_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && current_tags);
-  INSERT INTO edges SELECT * FROM working_edges;
+      AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+      AND (NOT filter_unresolved OR fossa_resolved(d.child)));
+  intermediate_edges fossa_edge[] := results;
+  working_edges fossa_edge[] := results;
+BEGIN
+  WHILE current_depth <= maxdepth LOOP
+    EXIT WHEN ARRAY_LENGTH(working_edges, 1) = 0;
+    EXIT WHEN ARRAY_LENGTH(working_edges, 1) IS NULL;
 
-  WHILE current_depth < maxdepth LOOP
-    RAISE NOTICE 'Current working table size % at depth %', ( SELECT COUNT(*) FROM working_edges ), current_depth;
-    EXIT WHEN ( SELECT COUNT(*) FROM working_edges ) = 0;
+    intermediate_edges := ARRAY(
+      SELECT CAST(ROW(
+        d.parent,
+        fossa_child(d.child, d.unresolved_locator),
+        fossa_resolved(d.child),
+        array_intersect(array_intersect_agg(d.transitive_excludes), array_intersect_agg((w).excludes)),
+        array_union(array_union_agg(d.tags), array_union_agg((w).tags)),
+        bool_or(d.manual),
+        bool_or(d.is_submodule),
+        min(current_depth)
+      ) AS fossa_edge)
+      FROM "Dependencies" AS d, UNNEST(working_edges) AS w
+      WHERE d.parent = (w).child
+        AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+        AND (NOT filter_unresolved OR fossa_resolved(d.child))
+        AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+      GROUP BY d.parent, fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
+    );
 
-    WITH f AS (
-      SELECT
-        d.parent AS parent,
-        fossa_null_dependency_helper(d.child, d.unresolved_locator) AS child,
-        array_sort_unique(d.transitive_excludes || w.excludes) AS excludes,
-        current_depth AS level,
-        d.tags,
-        d.manual,
-        d.is_submodule AS submodule,
-        d.child != 'NULL'
-      FROM "Dependencies" AS d
-      INNER JOIN working_edges AS w ON d.parent=w.child
-      WHERE d.child NOT LIKE ALL(w.excludes)
-        AND (d.manual OR current_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR current_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && current_tags)
-    ) INSERT INTO intermediate_edges SELECT * FROM f;
+    results := ARRAY(
+      SELECT CAST(ROW(
+        (r).parent,
+        (r).child,
+        (r).resolved,
+        array_intersect(array_intersect_agg((r).excludes), array_intersect_agg((w).excludes)),
+        array_union(array_union_agg((r).tags), array_union_agg((w).tags)),
+        bool_or((r).manual),
+        bool_or((r).submodule),
+        min((r).depth)
+      ) AS fossa_edge)
+      FROM UNNEST(results) AS r
+      LEFT JOIN UNNEST(intermediate_edges) AS w
+        ON (r).parent = (w).parent
+        AND (r).child = (w).child
+        AND (r).resolved = (w).resolved
+      GROUP BY (r).parent, (r).child, (r).resolved
+    );
 
-    TRUNCATE working_edges;
+    working_edges := ARRAY(
+      SELECT w FROM UNNEST(intermediate_edges) AS w
+      WHERE ((w).parent, (w).child, (w).resolved) NOT IN ( SELECT (r).parent, (r).child, (r).resolved FROM UNNEST(results) AS r )
+    );
 
-    WITH s1 AS (
-      SELECT
-        i.parent AS parent,
-        i.child AS child,
-        array_intersect_agg(i.excludes) AS excludes,
-        MIN(i.level) AS level,
-        array_union_agg(i.tags) AS tags,
-        BOOL_AND(i.manual) AS manual,
-        BOOL_AND(i.submodule) AS submodule,
-        i.resolved AS resolved
-      FROM intermediate_edges AS i
-      GROUP BY i.parent, i.child, i.resolved
-    ), s2 AS (
-      SELECT parent,
-             child,
-             array_sort_unique(excludes) AS excludes,
-             level,
-             array_sort_unique(s1.tags) AS tags,
-             manual,
-             submodule,
-             resolved
-        FROM s1
-    ), insert_edges AS (
-      SELECT * FROM s2
-        WHERE (s2.parent, s2.child, s2.resolved) NOT IN ( SELECT e.parent, e.child, e.resolved FROM edges AS e )
-    ), update_edges AS (
-      SELECT s2.parent,
-             s2.child,
-             array_sort_unique(array_intersect(s2.excludes, e.excludes)),
-             s2.level,
-             array_sort_unique(array_union(s2.tags, e.tags)),
-             s2.manual,
-             s2.submodule,
-             s2.resolved
-        FROM s2
-        INNER JOIN edges AS e
-        ON e.parent = s2.parent AND e.child = s2.child AND e.resolved = s2.resolved
-        WHERE s2.tags != e.tags
-          OR s2.excludes != e.excludes
-          AND s2.excludes <@ e.excludes
-    ), r1 AS (
-      INSERT INTO edges SELECT * FROM insert_edges
-    ), r2 AS (
-      UPDATE edges SET excludes=excludes FROM update_edges
-      WHERE edges.parent=update_edges.parent
-        AND edges.child=update_edges.child
-        AND edges.resolved=update_edges.resolved
-    ) INSERT INTO working_edges SELECT * FROM insert_edges;
-
-    TRUNCATE intermediate_edges;
+    results := results || working_edges;
 
     current_depth := current_depth + 1;
   END LOOP;
 
-  RETURN QUERY SELECT parent, child, level, edges.tags, manual, submodule, resolved FROM edges;
-END; $$ LANGUAGE PLPGSQL;
+  RETURN results;
+END; $$ LANGUAGE PLPGSQL STABLE;
 
-CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255), maxdepth INT) RETURNS SETOF fossa_edges_results AS $$
+CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255)) RETURNS fossa_edge[] AS $$
 BEGIN
-  RETURN QUERY SELECT * FROM fossa_edges(locator, NULL, maxdepth);
+  RETURN fossa_edges(locator, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR(255), tags VARCHAR[], maxdepth INT) RETURNS SETOF fossa_nodes_results AS $$
+CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR, filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_node[] AS $$
+DECLARE
+  current_depth INT := 2;
+  results fossa_node[] := ARRAY(SELECT CAST(ROW(
+      fossa_child(d.child, d.unresolved_locator),
+      fossa_resolved(d.child),
+      d.transitive_excludes,
+      d.tags,
+      d.manual,
+      d.is_submodule,
+      1
+    ) AS fossa_node)
+    FROM "Dependencies" AS d
+    WHERE d.parent=locator
+      AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+      AND (NOT filter_unresolved OR fossa_resolved(d.child)));
+  intermediate_nodes fossa_node[] := results;
+  working_nodes fossa_node[] := results;
 BEGIN
-  RETURN QUERY SELECT child, level, e.tags, manual, submodule, resolved FROM fossa_edges(locator, tags, maxdepth) AS e;
-END; $$ LANGUAGE PLPGSQL;
+  WHILE current_depth <= maxdepth LOOP
+    EXIT WHEN ARRAY_LENGTH(working_nodes, 1) = 0;
+    EXIT WHEN ARRAY_LENGTH(working_nodes, 1) IS NULL;
 
-CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR(255), maxdepth INT) RETURNS SETOF fossa_nodes_results AS $$
+    intermediate_nodes := ARRAY(
+      SELECT CAST(ROW(
+        fossa_child(d.child, d.unresolved_locator),
+        fossa_resolved(d.child),
+        array_intersect(array_intersect_agg(d.transitive_excludes), array_intersect_agg((w).excludes)),
+        array_union(array_union_agg(d.tags), array_union_agg((w).tags)),
+        bool_or(d.manual),
+        bool_or(d.is_submodule),
+        min(current_depth)
+      ) AS fossa_node)
+      FROM "Dependencies" AS d, UNNEST(working_nodes) AS w
+      WHERE d.parent = (w).node
+        AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+        AND (NOT filter_unresolved OR fossa_resolved(d.child))
+        AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+      GROUP BY fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
+    );
+
+    results := ARRAY(
+      SELECT CAST(ROW(
+        (r).node,
+        (r).resolved,
+        array_intersect(array_intersect_agg((r).excludes), array_intersect_agg((w).excludes)),
+        array_union(array_union_agg((r).tags), array_union_agg((w).tags)),
+        bool_or((r).manual),
+        bool_or((r).submodule),
+        min((r).depth)
+      ) AS fossa_node)
+      FROM UNNEST(results) AS r
+      LEFT JOIN UNNEST(intermediate_nodes) AS w
+        ON (r).node = (w).node
+        AND (r).resolved = (w).resolved
+      GROUP BY (r).node, (r).resolved
+    );
+
+    working_nodes := ARRAY(
+      SELECT w FROM UNNEST(intermediate_nodes) AS w
+      WHERE ((w).node, (w).resolved) NOT IN ( SELECT (r).node, (r).resolved FROM UNNEST(results) AS r )
+    );
+
+    results := results || working_nodes;
+
+    current_depth := current_depth + 1;
+  END LOOP;
+
+  RETURN results;
+END; $$ LANGUAGE PLPGSQL STABLE;
+
+CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR(255)) RETURNS fossa_node[] AS $$
 BEGIN
-  RETURN QUERY SELECT child, level, e.tags, manual, submodule, resolved FROM fossa_edges(locator, maxdepth) AS e;
+  RETURN fossa_dependencies(locator, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255), INT) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], INT) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), INT) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], INT) IS 'pg_fossa version 1.2';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.2';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255)) IS 'pg_fossa version 1.2';
+COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.2';
+COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255)) IS 'pg_fossa version 1.2';

@@ -1,7 +1,5 @@
 
-DROP TYPE fossa_edge CASCADE;
-DROP TYPE fossa_node CASCADE;
-
+CREATE TYPE fossa_extension__1_2 AS ();
 CREATE TYPE fossa_edge AS (
   parent VARCHAR,
   child VARCHAR,

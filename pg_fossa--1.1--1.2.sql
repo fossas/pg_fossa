@@ -2,7 +2,12 @@
 DROP FUNCTION fossa_dependencies_maxdepth(locator VARCHAR(255), maxdepth INT);
 DROP TYPE fossa_dependencies_graph_metadata CASCADE;
 
-CREATE TYPE fossa_extension__1_2 AS ();
+
+CREATE OR REPLACE FUNCTION fossa_version() RETURNS VARCHAR as $$
+BEGIN
+  RETURN '1.2';
+END; $$ LANGUAGE PLPGSQL IMMUTABLE;
+
 CREATE TYPE fossa_edge AS (
   parent VARCHAR,
   child VARCHAR,
@@ -16,7 +21,7 @@ CREATE TYPE fossa_edge AS (
 
 CREATE TYPE fossa_node AS (
   node VARCHAR,
-  resolved BOOLEAN,
+  unresolved_locators VARCHAR[],
   excludes VARCHAR[],
   tags VARCHAR[],
   manual BOOLEAN,
@@ -95,7 +100,7 @@ DECLARE
     ) AS fossa_edge)
     FROM "Dependencies" AS d
     WHERE d.parent=locator
-      AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+      AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child)));
   intermediate_edges fossa_edge[] := results;
   working_edges fossa_edge[] := results;
@@ -117,7 +122,7 @@ BEGIN
       ) AS fossa_edge)
       FROM "Dependencies" AS d, UNNEST(working_edges) AS w
       WHERE d.parent = (w).child
-        AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+        AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
         AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
@@ -165,8 +170,8 @@ CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR, filter_tags VARCH
 DECLARE
   current_depth INT := 2;
   results fossa_node[] := ARRAY(SELECT CAST(ROW(
-      fossa_child(d.child, d.unresolved_locator),
-      fossa_resolved(d.child),
+      d.child,
+      ARRAY[d.unresolved_locator],
       d.transitive_excludes,
       d.tags,
       d.manual,
@@ -175,7 +180,7 @@ DECLARE
     ) AS fossa_node)
     FROM "Dependencies" AS d
     WHERE d.parent=locator
-      AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+      AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child)));
   intermediate_nodes fossa_node[] := results;
   working_nodes fossa_node[] := results;
@@ -186,8 +191,8 @@ BEGIN
 
     intermediate_nodes := ARRAY(
       SELECT CAST(ROW(
-        fossa_child(d.child, d.unresolved_locator),
-        fossa_resolved(d.child),
+        d.child,
+        array_union(array_agg(d.unresolved_locator), array_union_agg((w).unresolved_locators)),
         array_intersect(array_intersect_agg(d.transitive_excludes), array_intersect_agg((w).excludes)),
         array_union(array_union_agg(d.tags), array_union_agg((w).tags)),
         bool_or(d.manual),
@@ -196,17 +201,17 @@ BEGIN
       ) AS fossa_node)
       FROM "Dependencies" AS d, UNNEST(working_nodes) AS w
       WHERE d.parent = (w).node
-        AND (filter_excludes IS NULL OR d.child != ANY(filter_excludes))
+        AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
         AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
-      GROUP BY fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
+      GROUP BY d.child
     );
 
     results := ARRAY(
       SELECT CAST(ROW(
         (r).node,
-        (r).resolved,
+        array_union(array_union_agg((r).unresolved_locators), array_union_agg((w).unresolved_locators)),
         array_intersect(array_intersect_agg((r).excludes), array_intersect_agg((w).excludes)),
         array_union(array_union_agg((r).tags), array_union_agg((w).tags)),
         bool_or((r).manual),
@@ -216,13 +221,12 @@ BEGIN
       FROM UNNEST(results) AS r
       LEFT JOIN UNNEST(intermediate_nodes) AS w
         ON (r).node = (w).node
-        AND (r).resolved = (w).resolved
-      GROUP BY (r).node, (r).resolved
+      GROUP BY (r).node
     );
 
     working_nodes := ARRAY(
       SELECT w FROM UNNEST(intermediate_nodes) AS w
-      WHERE ((w).node, (w).resolved) NOT IN ( SELECT (r).node, (r).resolved FROM UNNEST(results) AS r )
+      WHERE (w).node NOT IN ( SELECT (r).node FROM UNNEST(results) AS r )
     );
 
     results := results || working_nodes;

@@ -189,7 +189,7 @@ BEGIN
     intermediate_nodes := ARRAY(
       SELECT CAST(ROW(
         d.child,
-        array_union(array_agg(d.unresolved_locator), array_union_agg((w).unresolved_locators)),
+        array_agg(d.unresolved_locator),
         array_intersect(array_intersect_agg(d.transitive_excludes), array_intersect_agg((w).excludes)),
         array_union(array_union_agg(d.tags), array_union_agg((w).tags)),
         bool_or(d.manual),

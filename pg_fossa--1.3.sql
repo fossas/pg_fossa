@@ -97,7 +97,8 @@ DECLARE
     FROM "Dependencies" AS d
     WHERE d.parent=locator
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
-      AND (NOT filter_unresolved OR fossa_resolved(d.child)));
+      AND (NOT filter_unresolved OR fossa_resolved(d.child))
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_edges fossa_edge[] := results;
   working_edges fossa_edge[] := results;
 BEGIN
@@ -122,7 +123,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.parent, fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
     );
 
@@ -178,7 +179,8 @@ DECLARE
     FROM "Dependencies" AS d
     WHERE d.parent=locator
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
-      AND (NOT filter_unresolved OR fossa_resolved(d.child)));
+      AND (NOT filter_unresolved OR fossa_resolved(d.child))
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_nodes fossa_node[] := results;
   working_nodes fossa_node[] := results;
 BEGIN
@@ -202,7 +204,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR filter_tags IS NOT NULL AND d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.child
     );
 

@@ -14,6 +14,6 @@ PostgreSQL extension for Fossa
 
 ## Check Version
 
-To see the version of this plugin installed, try interrogating the description via `\dfnS+ fossa_dependencies`.
+To see the version of this plugin installed, execute `SELECT fossa_version()` in PostgreSQL.
 
-Another option is to execute `SELECT fossa_version()` in PostgreSQL.
+Another option is to try interrogating the description via `\dfnS+ fossa_dependencies`.

@@ -242,7 +242,7 @@ BEGIN
   RETURN fossa_dependencies(locator, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255)) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.2';
-COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255)) IS 'pg_fossa version 1.2';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.3';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255)) IS 'pg_fossa version 1.3';
+COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.3';
+COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255)) IS 'pg_fossa version 1.3';

@@ -30,6 +30,11 @@ CREATE TYPE fossa_node AS (
   depth INT
 );
 
+CREATE TYPE fossa_node_count AS (
+  node VARCHAR,
+  count INT
+);
+
 CREATE OR REPLACE FUNCTION array_symmetric_difference(a1 VARCHAR[], a2 VARCHAR[]) RETURNS VARCHAR[] as $$
 BEGIN
   RETURN ARRAY( SELECT DISTINCT e FROM (
@@ -104,7 +109,7 @@ DECLARE
     WHERE d.parent=locator
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child))
-      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_edges fossa_edge[] := results;
   working_edges fossa_edge[] := results;
 BEGIN
@@ -131,7 +136,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.parent, fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
     );
 
@@ -191,7 +196,7 @@ DECLARE
       AND (filter_origin_paths IS NULL AND filter_all_origin_paths IS NULL OR filter_origin_paths && d.origin_paths OR filter_all_origin_paths @> d.origin_paths)
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child))
-      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_nodes fossa_node[] := results;
   working_nodes fossa_node[] := results;
 BEGIN
@@ -217,7 +222,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.child
     );
 
@@ -256,7 +261,7 @@ BEGIN
   RETURN fossa_dependencies(locator, NULL, NULL, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[],VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
 COMMENT ON FUNCTION fossa_edges(VARCHAR(255)) IS 'pg_fossa version 1.4';
 COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
 COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255)) IS 'pg_fossa version 1.4';

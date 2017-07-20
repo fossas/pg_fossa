@@ -106,7 +106,7 @@ DECLARE
     WHERE d.parent=locator
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child))
-      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_edges fossa_edge[] := results;
   working_edges fossa_edge[] := results;
 BEGIN
@@ -133,7 +133,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.parent, fossa_child(d.child, d.unresolved_locator), fossa_resolved(d.child)
     );
 
@@ -193,7 +193,7 @@ DECLARE
       AND (filter_origin_paths IS NULL AND filter_all_origin_paths IS NULL OR filter_origin_paths && d.origin_paths OR filter_all_origin_paths @> d.origin_paths)
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child))
-      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
+      AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags));
   intermediate_nodes fossa_node[] := results;
   working_nodes fossa_node[] := results;
 BEGIN
@@ -219,7 +219,7 @@ BEGIN
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
         AND ((w).excludes IS NULL OR d.child NOT LIKE ALL((w).excludes))
-        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags)
+        AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.unresolved_locator NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags OR d.unresolved_locator LIKE 'mvn+%' AND d.tags && filter_tags)
       GROUP BY d.child
     );
 

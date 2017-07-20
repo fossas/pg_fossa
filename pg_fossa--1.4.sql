@@ -88,7 +88,7 @@ BEGIN
   RETURN locator != 'NULL';
 END; $$ LANGUAGE PLPGSQL IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255), filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_origin_paths VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_edge[] AS $$
+CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255), filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_origin_paths VARCHAR[], filter_all_origin_paths VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_edge[] AS $$
 DECLARE
   current_depth INT := 2;
   results fossa_edge[] := ARRAY(SELECT CAST(ROW(
@@ -128,7 +128,7 @@ BEGIN
       ) AS fossa_edge)
       FROM "Dependencies" AS d, UNNEST(working_edges) AS w
       WHERE d.parent = (w).child
-        AND (filter_origin_paths IS NULL OR filter_origin_paths @> d.origin_paths)
+        AND (filter_origin_paths IS NULL OR filter_origin_paths && d.origin_paths)
         AND NOT d.optional
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
@@ -172,10 +172,10 @@ END; $$ LANGUAGE PLPGSQL STABLE;
 
 CREATE OR REPLACE FUNCTION fossa_edges(locator VARCHAR(255)) RETURNS fossa_edge[] AS $$
 BEGIN
-  RETURN fossa_edges(locator, NULL, NULL, NULL, FALSE, 9999);
+  RETURN fossa_edges(locator, NULL, NULL, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR, filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_origin_paths VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_node[] AS $$
+CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR, filter_tags VARCHAR[], filter_excludes VARCHAR[], filter_origin_paths VARCHAR[], filter_all_origin_paths VARCHAR[], filter_unresolved BOOLEAN, maxdepth INT) RETURNS fossa_node[] AS $$
 DECLARE
   current_depth INT := 2;
   results fossa_node[] := ARRAY(SELECT CAST(ROW(
@@ -190,7 +190,7 @@ DECLARE
     ) AS fossa_node)
     FROM "Dependencies" AS d
     WHERE d.parent=locator
-      AND (filter_origin_paths IS NULL OR filter_origin_paths @> d.origin_paths)
+      AND (filter_origin_paths IS NULL AND filter_all_origin_paths IS NULL OR filter_origin_paths && d.origin_paths OR filter_all_origin_paths @> d.origin_paths)
       AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
       AND (NOT filter_unresolved OR fossa_resolved(d.child))
       AND (d.manual OR filter_tags IS NULL OR d.child NOT LIKE 'mvn+%' OR d.child LIKE 'mvn+%' AND d.tags && filter_tags));
@@ -214,7 +214,7 @@ BEGIN
       ) AS fossa_node)
       FROM "Dependencies" AS d, UNNEST(working_nodes) AS w
       WHERE d.parent = (w).node
-        AND (filter_origin_paths IS NULL OR filter_origin_paths @> d.origin_paths)
+        AND (filter_origin_paths IS NULL AND filter_all_origin_paths IS NULL OR filter_origin_paths && d.origin_paths OR filter_all_origin_paths @> d.origin_paths)
         AND NOT d.optional
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
@@ -255,10 +255,10 @@ END; $$ LANGUAGE PLPGSQL STABLE;
 
 CREATE OR REPLACE FUNCTION fossa_dependencies(locator VARCHAR(255)) RETURNS fossa_node[] AS $$
 BEGIN
-  RETURN fossa_dependencies(locator, NULL, NULL, NULL, FALSE, 9999);
+  RETURN fossa_dependencies(locator, NULL, NULL, NULL, NULL, FALSE, 9999);
 END; $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
+COMMENT ON FUNCTION fossa_edges(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
 COMMENT ON FUNCTION fossa_edges(VARCHAR(255)) IS 'pg_fossa version 1.4';
-COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
+COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255), VARCHAR[], VARCHAR[], VARCHAR[], VARCHAR[], BOOLEAN, INT) IS 'pg_fossa version 1.4';
 COMMENT ON FUNCTION fossa_dependencies(VARCHAR(255)) IS 'pg_fossa version 1.4';

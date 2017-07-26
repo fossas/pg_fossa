@@ -226,8 +226,8 @@ BEGIN
     results := ARRAY(
       SELECT CAST(ROW(
         (r).node,
-        array_union(array_union_agg((r).origin_paths), array_union_agg((w).origin_paths)),
         array_union(array_union_agg((r).unresolved_locators), array_union_agg((w).unresolved_locators)),
+        array_union(array_union_agg((r).origin_paths), array_union_agg((w).origin_paths)),
         array_intersect(array_intersect_agg((r).excludes), array_intersect_agg((w).excludes)),
         array_union(array_union_agg((r).tags), array_union_agg((w).tags)),
         bool_or((r).manual),

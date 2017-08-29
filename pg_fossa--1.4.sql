@@ -205,7 +205,7 @@ BEGIN
       SELECT CAST(ROW(
         d.child,
         array_agg(d.unresolved_locator),
-        array_agg(d.origin_paths),
+        array_union_agg(d.origin_paths),
         array_intersect(array_intersect_agg(d.transitive_excludes), array_intersect_agg((w).excludes)),
         array_union(array_union_agg(d.tags), array_union_agg((w).tags)),
         bool_or(d.manual),

@@ -1,6 +1,7 @@
 
 DROP TYPE fossa_edge CASCADE;
 DROP TYPE fossa_node CASCADE;
+DROP TYPE fossa_node_count CASCADE;
 
 CREATE OR REPLACE FUNCTION fossa_version() RETURNS VARCHAR as $$
 BEGIN

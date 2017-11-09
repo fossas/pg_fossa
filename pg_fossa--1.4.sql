@@ -214,7 +214,7 @@ BEGIN
       ) AS fossa_node)
       FROM "Dependencies" AS d, UNNEST(working_nodes) AS w
       WHERE d.parent = (w).node
-        AND (filter_origin_paths IS NULL AND filter_all_origin_paths IS NULL OR filter_origin_paths && d.origin_paths OR filter_all_origin_paths @> d.origin_paths)
+        AND (filter_all_origin_paths IS NULL OR filter_all_origin_paths @> d.origin_paths)
         AND NOT d.optional
         AND (filter_excludes IS NULL OR d.child != ALL(filter_excludes))
         AND (NOT filter_unresolved OR fossa_resolved(d.child))
